@@ -3,117 +3,134 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/storage"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
-func ShowToolsDialog(parent fyne.Window, state *AppState) {
-	d := fyne.CurrentApp().NewWindow("Ferramentas Rápidas - Atop")
-	d.Resize(fyne.NewSize(380, 420))
+func showToolsScreen() {
+	stopMonitoring()
+	clearMonitorListeners()
 
-	serial := state.DeviceSerial
-	if serial == "" {
-		d.SetContent(container.NewPadded(
-			container.NewVBox(
-				widget.NewLabelWithStyle("[!] Nenhum dispositivo conectado", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-				widget.NewLabel("Conecte um dispositivo Android via USB ou Wi-Fi antes de usar as ferramentas."),
-				widget.NewButton("Fechar", func() { d.Close() }),
-			),
-		))
-		d.Show()
-		return
+	state.Window.Canvas().SetOnTypedRune(nil)
+
+	// --- Ferramenta 1: Análise de Armazenamento (Gráfico de Pizza) ---
+	storageBtn := widget.NewButtonWithIcon("[◈] Analisar Armazenamento", theme.StorageIcon(), func() {
+		showStorageScreen()
+	})
+	storageDesc := widget.NewLabel("Varre o armazenamento do dispositivo e exibe um gráfico de pizza detalhado com as categorias que mais consomem espaço.")
+	storageDesc.Wrapping = fyne.TextWrapWord
+	storageDesc.TextStyle = fyne.TextStyle{Italic: true}
+
+	// --- Ferramenta 2: Gravação de Tela ---
+	var recordBtn *widget.Button
+	recordBtn = widget.NewButton("[REC] Iniciar Gravação", func() {
+		if state.IsRecording {
+			recordBtn.SetText("Salvando gravação...")
+			recordBtn.Disable()
+
+			go func() {
+				path, err := stopScreenRecording(state.CurrentDevice.Serial)
+				fyne.Do(func() {
+					recordBtn.Enable()
+					recordBtn.SetText("[REC] Iniciar Gravação")
+					recordBtn.Importance = widget.MediumImportance
+					recordBtn.Refresh()
+
+					if err != nil {
+						dialog.ShowError(err, state.Window)
+					} else {
+						dialog.ShowInformation("Gravação Concluída", "Vídeo salvo com sucesso em:\n"+path, state.Window)
+					}
+				})
+			}()
+		} else {
+			err := startScreenRecording(state.CurrentDevice.Serial)
+			if err != nil {
+				dialog.ShowError(err, state.Window)
+				return
+			}
+			recordBtn.SetText("[■] Parar Gravação")
+			recordBtn.Importance = widget.DangerImportance
+			recordBtn.Refresh()
+		}
+	})
+
+	if state.IsRecording {
+		recordBtn.SetText("[■] Parar Gravação")
+		recordBtn.Importance = widget.DangerImportance
 	}
 
-	statusLabel := widget.NewLabel("")
+	recordDesc := widget.NewLabel("Grava a tela do dispositivo móvel (máx 3 min) e salva o arquivo em ~/Videos/.")
+	recordDesc.Wrapping = fyne.TextWrapWord
+	recordDesc.TextStyle = fyne.TextStyle{Italic: true}
 
-	rebootBtn := widget.NewButton("Reiniciar Dispositivo", func() {
-		statusLabel.SetText("[•] Reiniciando aparelho...")
-		go func() {
-			err := RebootDevice(serial)
-			if err != nil {
-				statusLabel.SetText("[!] Erro: " + err.Error())
-			} else {
-				statusLabel.SetText("[+] Comando de reinício enviado.")
+	// --- Ferramenta 3: Instalar APK ---
+	installBtn := widget.NewButtonWithIcon("[+] Instalar Pacote APK", theme.FolderOpenIcon(), func() {
+		fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil || reader == nil {
+				return
 			}
-		}()
+			apkPath := reader.URI().Path()
+			reader.Close()
+
+			progressBar := widget.NewProgressBarInfinite()
+			progressDialog := dialog.NewCustomWithoutButtons("Instalando APK no celular...", progressBar, state.Window)
+			progressDialog.Show()
+
+			go func() {
+				installErr := installAPK(state.CurrentDevice.Serial, apkPath)
+				progressDialog.Hide()
+				if installErr != nil {
+					dialog.ShowError(installErr, state.Window)
+				} else {
+					dialog.ShowInformation("Instalação Concluída", "Aplicativo instalado com sucesso!", state.Window)
+				}
+			}()
+		}, state.Window)
+		fd.SetFilter(storage.NewExtensionFileFilter([]string{".apk"}))
+		fd.Show()
 	})
 
-	rebootRecBtn := widget.NewButton("Reiniciar no Recovery", func() {
-		statusLabel.SetText("[•] Reiniciando no Recovery...")
-		go func() {
-			err := RebootRecovery(serial)
-			if err != nil {
-				statusLabel.SetText("[!] Erro: " + err.Error())
-			} else {
-				statusLabel.SetText("[+] Reiniciando no Recovery.")
-			}
-		}()
+	installDesc := widget.NewLabel("Selecione um arquivo .apk local no seu computador para enviar e instalar no dispositivo conectado.")
+	installDesc.Wrapping = fyne.TextWrapWord
+	installDesc.TextStyle = fyne.TextStyle{Italic: true}
+
+	// --- Botão Voltar ---
+	backBtn := widget.NewButtonWithIcon("Voltar ao Monitor", theme.NavigateBackIcon(), func() {
+		showMonitorScreen()
 	})
 
-	rebootBlBtn := widget.NewButton("Reiniciar no Bootloader / Fastboot", func() {
-		statusLabel.SetText("[•] Reiniciando no Bootloader...")
-		go func() {
-			err := RebootBootloader(serial)
-			if err != nil {
-				statusLabel.SetText("[!] Erro: " + err.Error())
-			} else {
-				statusLabel.SetText("[+] Reiniciando no Bootloader.")
-			}
-		}()
-	})
-
-	airplaneBtn := widget.NewButton("Alternar Modo Avião (Reset de Rede)", func() {
-		statusLabel.SetText("[•] Alternando modo avião...")
-		go func() {
-			err := ToggleAirplaneMode(serial)
-			if err != nil {
-				statusLabel.SetText("[!] Erro: " + err.Error())
-			} else {
-				statusLabel.SetText("[+] Modo avião alternado com sucesso.")
-			}
-		}()
-	})
-
-	clearLogcatBtn := widget.NewButton("Limpar Buffer do Logcat", func() {
-		statusLabel.SetText("[•] Limpando logcat...")
-		go func() {
-			err := ClearLogcat(serial)
-			if err != nil {
-				statusLabel.SetText("[!] Erro: " + err.Error())
-			} else {
-				statusLabel.SetText("[+] Logcat limpo.")
-			}
-		}()
-	})
-
-	screenshotBtn := widget.NewButton("Capturar Screenshot do Aparelho", func() {
-		statusLabel.SetText("[•] Capturando tela...")
-		go func() {
-			path, err := TakeScreenshot(serial)
-			if err != nil {
-				statusLabel.SetText("[!] Erro: " + err.Error())
-			} else {
-				statusLabel.SetText("[+] Salvo em: " + path)
-			}
-		}()
-	})
-
-	content := container.NewVBox(
-		widget.NewLabelWithStyle("[•] Ações e Comandos Rápidos", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("Dispositivo alvo: "+serial),
-		widget.NewSeparator(),
-		screenshotBtn,
-		airplaneBtn,
-		clearLogcatBtn,
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("[!] Opções de Reinicialização", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		rebootBtn,
-		rebootRecBtn,
-		rebootBlBtn,
-		widget.NewSeparator(),
-		statusLabel,
-		widget.NewButton("Fechar", func() { d.Close() }),
+	// --- Layout ---
+	header := container.NewBorder(nil, nil, backBtn, nil,
+		container.NewCenter(widget.NewLabelWithStyle("Ferramentas do Dispositivo", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})),
 	)
 
-	d.SetContent(container.NewPadded(content))
-	d.Show()
+	content := container.NewPadded(
+		container.NewVBox(
+			header,
+			widget.NewSeparator(),
+
+			widget.NewCard("Armazenamento e Disco", "", container.NewVBox(
+				storageBtn,
+				storageDesc,
+			)),
+
+			widget.NewCard("Captura e Gravação de Tela", "", container.NewVBox(
+				recordBtn,
+				recordDesc,
+			)),
+
+			widget.NewCard("Gerenciamento de Aplicativos", "", container.NewVBox(
+				installBtn,
+				installDesc,
+			)),
+
+			layout.NewSpacer(),
+		),
+	)
+
+	state.Window.SetContent(content)
 }

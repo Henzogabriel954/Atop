@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"image"
 	"image/color"
 	"math"
 	"time"
@@ -10,247 +11,254 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
-// PieChartRaster desenha um gráfico de pizza vetorial limpo e minimalista
-type PieChartRaster struct {
-	widget.BaseWidget
-	categories []StorageCategory
-	raster     *canvas.Raster
+type pieAngleSlice struct {
+	startAngle float64
+	endAngle   float64
+	color      color.RGBA
 }
 
-func NewPieChartRaster(categories []StorageCategory) *PieChartRaster {
-	p := &PieChartRaster{
-		categories: categories,
-	}
-	p.raster = canvas.NewRaster(p.draw)
-	p.ExtendBaseWidget(p)
-	return p
-}
+func showStorageScreen() {
+	stopMonitoring()
+	clearMonitorListeners()
 
-func (p *PieChartRaster) SetCategories(cats []StorageCategory) {
-	p.categories = cats
-	p.Refresh()
-}
-
-func (p *PieChartRaster) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(p.raster)
-}
-
-func (p *PieChartRaster) draw(w, h int) image_Image {
-	img := newNRGBA(w, h)
-
-	if len(p.categories) == 0 || w <= 0 || h <= 0 {
-		return img
-	}
-
-	var totalBytes int64
-	for _, c := range p.categories {
-		totalBytes += c.Bytes
-	}
-	if totalBytes == 0 {
-		return img
-	}
-
-	cx := float64(w) / 2.0
-	cy := float64(h) / 2.0
-	outerRadius := math.Min(cx, cy) - 4.0
-	innerRadius := outerRadius * 0.52 // Estilo Donut elegante e minimalista
-
-	// Calcula fatias com ângulos (em radianos)
-	type slice struct {
-		startAngle float64
-		endAngle   float64
-		col        color.NRGBA
-	}
-	slices := make([]slice, 0, len(p.categories))
-
-	currentAngle := -math.Pi / 2 // Inicia no topo (12 horas)
-	for _, cat := range p.categories {
-		fraction := float64(cat.Bytes) / float64(totalBytes)
-		sweep := fraction * 2.0 * math.Pi
-		nrgba, ok := cat.Color.(color.NRGBA)
-		if !ok {
-			nrgba = color.NRGBA{R: 120, G: 120, B: 120, A: 255}
+	state.Window.Canvas().SetOnTypedRune(func(r rune) {
+		if r == 'q' || r == 'Q' {
+			showToolsScreen()
 		}
-		slices = append(slices, slice{
-			startAngle: currentAngle,
-			endAngle:   currentAngle + sweep,
-			col:        nrgba,
-		})
-		currentAngle += sweep
-	}
+	})
 
-	for y := 0; y < h; y++ {
-		dy := float64(y) - cy
-		for x := 0; x < w; x++ {
-			dx := float64(x) - cx
-			dist := math.Hypot(dx, dy)
-
-			if dist >= innerRadius && dist <= outerRadius {
-				angle := math.Atan2(dy, dx)
-				if angle < -math.Pi/2 {
-					angle += 2.0 * math.Pi
-				}
-
-				for _, s := range slices {
-					inSlice := false
-					if s.endAngle <= math.Pi*1.5 {
-						if angle >= s.startAngle && angle < s.endAngle {
-							inSlice = true
-						}
-					} else {
-						// Casos de quebra de ciclo
-						if angle >= s.startAngle || angle < (s.endAngle-2.0*math.Pi) {
-							inSlice = true
-						}
-					}
-
-					if inSlice {
-						img.SetNRGBA(x, y, s.col)
-						break
-					}
-				}
-			}
-		}
-	}
-
-	return img
-}
-
-type image_Image interface {
-	ColorModel() color.Model
-	Bounds() image_Rectangle
-	At(x, y int) color.Color
-}
-
-type image_Rectangle struct {
-	Min, Max struct{ X, Y int }
-}
-
-func (r image_Rectangle) Dx() int { return r.Max.X - r.Min.X }
-func (r image_Rectangle) Dy() int { return r.Max.Y - r.Min.Y }
-
-type customNRGBA struct {
-	Pix    []uint8
-	Stride int
-	Rect   image_Rectangle
-}
-
-func newNRGBA(w, h int) *customNRGBA {
-	return &customNRGBA{
-		Pix:    make([]uint8, 4*w*h),
-		Stride: 4 * w,
-		Rect:   image_Rectangle{Max: struct{ X, Y int }{w, h}},
-	}
-}
-
-func (p *customNRGBA) ColorModel() color.Model { return color.NRGBAModel }
-func (p *customNRGBA) Bounds() image_Rectangle { return p.Rect }
-func (p *customNRGBA) At(x, y int) color.Color {
-	i := y*p.Stride + x*4
-	return color.NRGBA{R: p.Pix[i], G: p.Pix[i+1], B: p.Pix[i+2], A: p.Pix[i+3]}
-}
-func (p *customNRGBA) SetNRGBA(x, y int, c color.NRGBA) {
-	i := y*p.Stride + x*4
-	p.Pix[i] = c.R
-	p.Pix[i+1] = c.G
-	p.Pix[i+2] = c.B
-	p.Pix[i+3] = c.A
-}
-
-func ShowStorageAnalysisDialog(parent fyne.Window, state *AppState) {
-	d := fyne.CurrentApp().NewWindow("Análise de Armazenamento - Atop")
-	d.Resize(fyne.NewSize(500, 580))
-
-	serial := state.DeviceSerial
-	if serial == "" {
-		d.SetContent(container.NewPadded(
-			container.NewVBox(
-				widget.NewLabelWithStyle("[!] Nenhum dispositivo conectado", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-				widget.NewLabel("Conecte um dispositivo Android via USB ou Wi-Fi antes de analisar o armazenamento."),
-				widget.NewButton("Fechar", func() { d.Close() }),
-			),
-		))
-		d.Show()
-		return
-	}
-
-	header := widget.NewLabelWithStyle("[•] Análise de Armazenamento Interno", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-	deviceLabel := widget.NewLabelWithStyle("Dispositivo: "+serial, fyne.TextAlignCenter, fyne.TextStyle{Italic: true})
-
-	statusProgress := widget.NewProgressBarInfinite()
-	statusText := widget.NewLabel("Iniciando varredura rápida de diretórios...")
+	statusLabel := widget.NewLabelWithStyle("[•] Clique no botão abaixo para escanear o armazenamento.", fyne.TextAlignCenter, fyne.TextStyle{Italic: true})
+	progressBar := widget.NewProgressBarInfinite()
+	progressContainer := container.NewPadded(progressBar)
+	progressContainer.Hide()
 
 	chartContainer := container.NewCenter()
-	legendBox := container.NewVBox()
+	legendContainer := container.NewVBox()
+	summaryLabel := widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 
-	scanBtn := widget.NewButton("Escanear Novamente", nil)
+	var btnScan *widget.Button
 
-	var runScan func()
-	runScan = func() {
-		statusProgress.Show()
-		statusText.SetText("Examinando pastas (/sdcard/DCIM, Download, Android, etc)...")
-		scanBtn.Disable()
+	runScan := func() {
+		btnScan.Disable()
+		progressContainer.Show()
+		statusLabel.SetText("[•] Escaneando partições e diretórios do dispositivo via ADB...")
+		statusLabel.Refresh()
 
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()
 
-			report, err := ScanStorageDetailed(ctx, serial)
+			report, err := scanDeviceStorage(ctx, state.CurrentDevice.Serial)
 
-			time.Sleep(200 * time.Millisecond) // Suaviza a transição
-			statusProgress.Hide()
-			scanBtn.Enable()
+			fyne.Do(func() {
+				progressContainer.Hide()
+				btnScan.Enable()
 
-			if err != nil {
-				statusText.SetText("[!] Falha ao analisar: " + err.Error())
-				return
-			}
-
-			statusText.SetText(fmt.Sprintf("[+] Varredura concluída. Total analisado: %s", formatBytes(report.TotalUsed)))
-
-			pie := NewPieChartRaster(report.Categories)
-			pieContainer := container.NewGridWrap(fyne.NewSize(200, 200), pie)
-			chartContainer.Objects = []fyne.CanvasObject{pieContainer}
-			chartContainer.Refresh()
-
-			legendBox.Objects = nil
-			for _, cat := range report.Categories {
-				pct := 0.0
-				if report.TotalUsed > 0 {
-					pct = float64(cat.Bytes) / float64(report.TotalUsed) * 100
+				if err != nil || report == nil {
+					statusLabel.SetText("[!] Falha ao realizar a varredura de armazenamento.")
+					dialog.ShowError(fmt.Errorf("Erro ao obter dados: %v", err), state.Window)
+					return
 				}
-				row := container.NewHBox(
-					widget.NewLabel(fmt.Sprintf("■ %s:", cat.Name)),
-					widget.NewLabelWithStyle(fmt.Sprintf("%s (%.1f%%)", formatBytes(cat.Bytes), pct), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-				)
-				legendBox.Add(row)
-			}
-			legendBox.Refresh()
+
+				statusLabel.SetText("[+] Varredura concluída com sucesso.")
+
+				// Atualiza Gráfico de Pizza
+				chartRaster := buildPieChartRaster(report, 220)
+				chartContainer.Objects = []fyne.CanvasObject{chartRaster}
+				chartContainer.Refresh()
+
+				// Atualiza Legenda
+				legendContainer.Objects = nil
+				for _, s := range report.Slices {
+					// Indicador visual colorido com símbolo ■
+					swatch := canvas.NewText("■", s.Color)
+					swatch.TextSize = 14
+					swatch.TextStyle = fyne.TextStyle{Bold: true}
+
+					catText := canvas.NewText(fmt.Sprintf("%-18s %8s (%4.1f%%)", s.Name, s.Formatted, s.Percentage), theme.ForegroundColor())
+					catText.TextSize = 12
+					catText.TextStyle = fyne.TextStyle{Monospace: true}
+
+					row := container.NewHBox(swatch, catText)
+					legendContainer.Add(row)
+				}
+				legendContainer.Refresh()
+
+				// Atualiza Resumo de Capacidade
+				freePct := 0.0
+				usedPct := 0.0
+				if report.TotalBytes > 0 {
+					usedPct = (float64(report.UsedBytes) / float64(report.TotalBytes)) * 100.0
+					freePct = (float64(report.FreeBytes) / float64(report.TotalBytes)) * 100.0
+				}
+
+				summaryLabel.SetText(fmt.Sprintf("Total: %s  |  Usado: %s (%.1f%%)  |  Livre: %s (%.1f%%)",
+					formatBytes(report.TotalBytes),
+					formatBytes(report.UsedBytes),
+					usedPct,
+					formatBytes(report.FreeBytes),
+					freePct,
+				))
+				summaryLabel.Refresh()
+			})
 		}()
 	}
 
-	scanBtn.OnTapped = runScan
+	btnScan = widget.NewButtonWithIcon("[▸] Iniciar Varredura de Armazenamento", theme.SearchIcon(), func() {
+		runScan()
+	})
+	btnScan.Importance = widget.HighImportance
 
-	body := container.NewVBox(
-		header,
-		deviceLabel,
-		widget.NewSeparator(),
-		statusProgress,
-		statusText,
+	backBtn := widget.NewButtonWithIcon("Voltar", theme.NavigateBackIcon(), func() {
+		showToolsScreen()
+	})
+
+	deviceInfo := canvas.NewText(state.CurrentDevice.Model+" ("+state.CurrentDevice.Serial+")", color.RGBA{R: 160, G: 160, B: 170, A: 255})
+	deviceInfo.TextSize = 11
+
+	headerCenter := container.NewVBox(
+		container.NewCenter(widget.NewLabelWithStyle("Análise de Armazenamento", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})),
+		container.NewCenter(deviceInfo),
+	)
+	header := container.NewBorder(nil, nil, backBtn, nil, headerCenter)
+
+	// Inicia com um placeholder do gráfico
+	emptyRaster := buildPieChartRaster(nil, 220)
+	chartContainer.Objects = []fyne.CanvasObject{emptyRaster}
+
+	chartAndLegend := container.NewVBox(
 		chartContainer,
-		legendBox,
+		container.NewCenter(summaryLabel),
 		widget.NewSeparator(),
-		container.NewHBox(
-			scanBtn,
-			widget.NewButton("Fechar", func() { d.Close() }),
-		),
+		container.NewCenter(legendContainer),
 	)
 
-	d.SetContent(container.NewPadded(body))
-	d.Show()
+	scrollContent := container.NewVScroll(chartAndLegend)
+	scrollContent.SetMinSize(fyne.NewSize(450, 420))
 
-	runScan()
+	mainCard := container.NewVBox(
+		btnScan,
+		statusLabel,
+		progressContainer,
+		widget.NewSeparator(),
+	)
+
+	body := container.NewBorder(mainCard, nil, nil, nil, scrollContent)
+	content := container.NewPadded(container.NewBorder(header, nil, nil, nil, body))
+
+	state.Window.SetContent(content)
+
+	// Dispara varredura automática ao entrar na tela
+	go runScan()
+}
+
+// buildPieChartRaster desenha um gráfico de pizza estilo Donut nítido e anti-aliased
+func buildPieChartRaster(report *StorageReport, dimension int) *canvas.Raster {
+	var angleSlices []pieAngleSlice
+
+	if report != nil && len(report.Slices) > 0 && report.TotalBytes > 0 {
+		currentAngle := 0.0
+		for _, s := range report.Slices {
+			if s.Bytes <= 0 {
+				continue
+			}
+			sliceAngle := (float64(s.Bytes) / float64(report.TotalBytes)) * 2.0 * math.Pi
+			angleSlices = append(angleSlices, pieAngleSlice{
+				startAngle: currentAngle,
+				endAngle:   currentAngle + sliceAngle,
+				color:      s.Color,
+			})
+			currentAngle += sliceAngle
+		}
+	}
+
+	raster := canvas.NewRaster(func(w, h int) image.Image {
+		img := image.NewRGBA(image.Rect(0, 0, w, h))
+
+		cx := float64(w) / 2.0
+		cy := float64(h) / 2.0
+		radius := math.Min(cx, cy) - 8.0
+		if radius < 10 {
+			radius = 10
+		}
+		innerRadius := radius * 0.42
+
+		innerR2 := innerRadius * innerRadius
+		outerR2 := radius * radius
+
+		// Se não houver dados, desenha um anel cinza de placeholder
+		if len(angleSlices) == 0 {
+			placeholderCol := color.RGBA{R: 50, G: 50, B: 55, A: 255}
+			for y := 0; y < h; y++ {
+				dy := float64(y) - cy
+				for x := 0; x < w; x++ {
+					dx := float64(x) - cx
+					d2 := dx*dx + dy*dy
+					if d2 >= innerR2 && d2 <= outerR2 {
+						img.SetRGBA(x, y, placeholderCol)
+					}
+				}
+			}
+			return img
+		}
+
+		for y := 0; y < h; y++ {
+			dy := float64(y) - cy
+			for x := 0; x < w; x++ {
+				dx := float64(x) - cx
+				d2 := dx*dx + dy*dy
+
+				if d2 >= innerR2 && d2 <= outerR2 {
+					// Ângulo em radianos normalizado de 0 a 2*pi
+					angle := math.Atan2(dy, dx)
+					if angle < 0 {
+						angle += 2.0 * math.Pi
+					}
+
+					// Localiza a fatia correspondente
+					var sliceCol color.RGBA = color.RGBA{R: 60, G: 60, B: 60, A: 255}
+					for _, as := range angleSlices {
+						if angle >= as.startAngle && angle <= as.endAngle {
+							sliceCol = as.color
+							break
+						}
+					}
+
+					// Anti-aliasing suave nas bordas externa e interna
+					dist := math.Sqrt(d2)
+					alpha := 255.0
+					if dist > radius-1.0 {
+						alpha = 255.0 * (radius - dist)
+					} else if dist < innerRadius+1.0 {
+						alpha = 255.0 * (dist - innerRadius)
+					}
+					if alpha > 255.0 {
+						alpha = 255.0
+					}
+					if alpha < 0.0 {
+						alpha = 0.0
+					}
+
+					if alpha > 0 {
+						img.SetRGBA(x, y, color.RGBA{
+							R: uint8(float64(sliceCol.R) * (alpha / 255.0)),
+							G: uint8(float64(sliceCol.G) * (alpha / 255.0)),
+							B: uint8(float64(sliceCol.B) * (alpha / 255.0)),
+							A: uint8(alpha),
+						})
+					}
+				}
+			}
+		}
+
+		return img
+	})
+
+	raster.SetMinSize(fyne.NewSize(float32(dimension), float32(dimension)))
+	return raster
 }
