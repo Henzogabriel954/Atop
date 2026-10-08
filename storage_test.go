@@ -2,45 +2,57 @@ package main
 
 import (
 	"image/color"
+	"math"
 	"testing"
 )
 
-func TestStorageCategoryParsing(t *testing.T) {
-	cats := []StorageCategory{
-		{Name: "Fotos & Videos", Path: "/sdcard/DCIM", Color: color.NRGBA{R: 66, G: 133, B: 244, A: 255}, Bytes: 1048576},
-		{Name: "Musicas & Audio", Path: "/sdcard/Music", Color: color.NRGBA{R: 52, G: 168, B: 83, A: 255}, Bytes: 2097152},
-		{Name: "Downloads", Path: "/sdcard/Download", Color: color.NRGBA{R: 251, G: 188, B: 5, A: 255}, Bytes: 3145728},
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		bytes    int64
+		expected string
+	}{
+		{0, "0 B"},
+		{500, "500 B"},
+		{1024, "1.0 KB"},
+		{1536, "1.5 KB"},
+		{1048576, "1.0 MB"},
+		{1073741824, "1.0 GB"},
+		{5368709120, "5.0 GB"},
 	}
 
-	var total int64
-	for _, c := range cats {
-		total += c.Bytes
-	}
-
-	expected := int64(1048576 + 2097152 + 3145728)
-	if total != expected {
-		t.Errorf("Total bytes mismatch: got %d, want %d", total, expected)
-	}
-
-	formatted := formatBytes(total)
-	if formatted != "6.0 MB" {
-		t.Errorf("formatBytes(%d) = %s, want 6.0 MB", total, formatted)
+	for _, tt := range tests {
+		got := formatBytes(tt.bytes)
+		if got != tt.expected {
+			t.Errorf("formatBytes(%d) = %q; esperado %q", tt.bytes, got, tt.expected)
+		}
 	}
 }
 
-func TestPieChartAngles(t *testing.T) {
-	cats := []StorageCategory{
-		{Name: "Cat A", Bytes: 50, Color: color.NRGBA{255, 0, 0, 255}},
-		{Name: "Cat B", Bytes: 50, Color: color.NRGBA{0, 255, 0, 255}},
+func TestStorageReportSliceAngles(t *testing.T) {
+	report := &StorageReport{
+		TotalBytes: 100 * 1024 * 1024, // 100 MB
+		UsedBytes:  60 * 1024 * 1024,  // 60 MB
+		FreeBytes:  40 * 1024 * 1024,  // 40 MB
+		Slices: []StorageSlice{
+			{Name: "Fotos", Bytes: 30 * 1024 * 1024, Color: color.RGBA{R: 255, A: 255}},
+			{Name: "Vídeos", Bytes: 30 * 1024 * 1024, Color: color.RGBA{G: 255, A: 255}},
+			{Name: "Livre", Bytes: 40 * 1024 * 1024, Color: color.RGBA{B: 255, A: 255}},
+		},
 	}
-	var total int64 = 100
 
-	angles := make([]float64, len(cats))
-	for i, c := range cats {
-		angles[i] = (float64(c.Bytes) / float64(total)) * 360.0
+	totalAngle := 0.0
+	for _, s := range report.Slices {
+		angle := (float64(s.Bytes) / float64(report.TotalBytes)) * 2.0 * math.Pi
+		totalAngle += angle
 	}
 
-	if angles[0] != 180.0 || angles[1] != 180.0 {
-		t.Errorf("Expected 180 and 180 degrees, got %f and %f", angles[0], angles[1])
+	if math.Abs(totalAngle-2.0*math.Pi) > 0.001 {
+		t.Errorf("A soma dos ângulos da pizza = %v rad; esperado %v rad (2*pi)", totalAngle, 2.0*math.Pi)
+	}
+
+	// Testa que buildPieChartRaster instancia sem panics
+	raster := buildPieChartRaster(report, 100)
+	if raster == nil {
+		t.Errorf("buildPieChartRaster retornou nil")
 	}
 }

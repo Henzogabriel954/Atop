@@ -3,52 +3,38 @@ package main
 import (
 	"image/color"
 	"testing"
-
-	"fyne.io/fyne/v2/theme"
 )
 
-func TestCleanThemeColors(t *testing.T) {
-	th := &CleanTheme{}
-	bg := th.Color(theme.ColorNameBackground, theme.VariantDark)
-	r, g, b, a := bg.RGBA()
-	if a == 0 {
-		t.Errorf("CleanTheme background alpha is 0")
+func TestParseHexColor(t *testing.T) {
+	tests := []struct {
+		input       string
+		shouldBeNil bool
+		expected    color.RGBA
+	}{
+		{"#10B981", false, color.RGBA{R: 16, G: 185, B: 129, A: 255}},
+		{"#ffffff", false, color.RGBA{R: 255, G: 255, B: 255, A: 255}},
+		{"#000000", false, color.RGBA{R: 0, G: 0, B: 0, A: 255}},
+		{"#invalid", true, color.RGBA{}},
+		{"10B981", true, color.RGBA{}},
+		{"#12", true, color.RGBA{}},
+		{"", true, color.RGBA{}},
 	}
 
-	// Verifica se a cor de fundo é escura e minimalista (RGB baixo)
-	r8 := uint8(r >> 8)
-	g8 := uint8(g >> 8)
-	b8 := uint8(b >> 8)
-
-	if r8 > 50 || g8 > 50 || b8 > 50 {
-		t.Errorf("CleanTheme background is too bright for dark minimal theme: (%d, %d, %d)", r8, g8, b8)
-	}
-}
-
-func TestCleanThemeSizes(t *testing.T) {
-	th := &CleanTheme{}
-	padding := th.Size(theme.SizeNamePadding)
-	if padding <= 0 {
-		t.Errorf("Invalid padding size: %f", padding)
-	}
-
-	text := th.Size(theme.SizeNameText)
-	if text <= 0 {
-		t.Errorf("Invalid text size: %f", text)
-	}
-}
-
-func TestGetAccentColor(t *testing.T) {
-	state := NewAppState()
-	state.ColorPalette = "blue"
-	c := state.GetAccentColor()
-	if c == nil {
-		t.Errorf("Accent color should not be nil")
-	}
-
-	state.ColorPalette = "green"
-	cGreen := state.GetAccentColor()
-	if _, ok := cGreen.(color.NRGBA); !ok {
-		t.Errorf("Accent color should be NRGBA")
+	for _, tt := range tests {
+		got := parseHexColor(tt.input)
+		if tt.shouldBeNil {
+			if got != nil {
+				t.Errorf("parseHexColor(%q) deveria ser nil; recebido %v", tt.input, got)
+			}
+		} else {
+			if got == nil {
+				t.Errorf("parseHexColor(%q) retornou nil inesperado", tt.input)
+				continue
+			}
+			rgba, ok := got.(color.RGBA)
+			if !ok || rgba != tt.expected {
+				t.Errorf("parseHexColor(%q) = %v; esperado %v", tt.input, got, tt.expected)
+			}
+		}
 	}
 }

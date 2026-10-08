@@ -5,34 +5,47 @@ import (
 	"testing"
 )
 
-func TestFormatBytes(t *testing.T) {
+func TestParseMemoryKB(t *testing.T) {
 	tests := []struct {
-		input    int64
-		expected string
+		input    string
+		expected float64
 	}{
-		{0, "0 B"},
-		{500, "500 B"},
-		{1024, "1.0 KB"},
-		{1536, "1.5 KB"},
-		{1048576, "1.0 MB"},
-		{1073741824, "1.0 GB"},
-		{5368709120, "5.0 GB"},
+		{"4096K", 4096},
+		{"4096k", 4096},
+		{"512M", 512 * 1024},
+		{"512m", 512 * 1024},
+		{"5.8G", 5.8 * 1024 * 1024},
+		{"5.8g", 5.8 * 1024 * 1024},
+		{"5,932,592K", 5932592},
+		{"1000", 1000},
+		{"", 0},
 	}
 
 	for _, tt := range tests {
-		got := formatBytes(tt.input)
-		if got != tt.expected {
-			t.Errorf("formatBytes(%d) = %s; want %s", tt.input, got, tt.expected)
+		got := parseMemoryKB(tt.input)
+		if math.Abs(got-tt.expected) > 0.01 {
+			t.Errorf("parseMemoryKB(%q) = %v; esperado %v", tt.input, got, tt.expected)
 		}
 	}
 }
 
-func TestPercentCalculation(t *testing.T) {
-	total := int64(1000)
-	used := int64(250)
-	pct := float64(used) / float64(total) * 100
+func TestIsNumeric(t *testing.T) {
+	if !isNumeric("1234") {
+		t.Errorf("isNumeric(\"1234\") deveria ser true")
+	}
+	if isNumeric("12a4") {
+		t.Errorf("isNumeric(\"12a4\") deveria ser false")
+	}
+	if isNumeric("") {
+		t.Errorf("isNumeric(\"\") deveria ser false")
+	}
+}
 
-	if math.Abs(pct-25.0) > 0.001 {
-		t.Errorf("expected 25.0, got %f", pct)
+func TestTruncateString(t *testing.T) {
+	if got := truncateString("AndroidDevice", 7); got != "Android" {
+		t.Errorf("truncateString(\"AndroidDevice\", 7) = %q; esperado \"Android\"", got)
+	}
+	if got := truncateString("ADB", 10); got != "ADB" {
+		t.Errorf("truncateString(\"ADB\", 10) = %q; esperado \"ADB\"", got)
 	}
 }
