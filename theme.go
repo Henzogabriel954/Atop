@@ -4,78 +4,123 @@ import (
 	"bufio"
 	"image/color"
 	"os"
-	"os/user"
-	"path/filepath"
-	"strconv"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
 )
 
-// Cor de fallback
-var fallbackColor = color.RGBA{R: 35, G: 35, B: 35, A: 255}
+type CleanTheme struct{}
 
-type DynamicTheme struct {
-	accentColor color.Color
-}
+var _ fyne.Theme = (*CleanTheme)(nil)
 
-func NewDynamicTheme() fyne.Theme {
-	col := getWalColor()
-	return &DynamicTheme{accentColor: col}
-}
-
-func (t *DynamicTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
-	// Cor de fundo SÓLIDA
-	if name == theme.ColorNameBackground {
-		return color.RGBA{R: 20, G: 20, B: 20, A: 255}
+func (m *CleanTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	switch name {
+	case theme.ColorNameBackground:
+		return color.NRGBA{R: 18, G: 20, B: 24, A: 255}
+	case theme.ColorNameButton:
+		return color.NRGBA{R: 30, G: 34, B: 42, A: 255}
+	case theme.ColorNameDisabledButton:
+		return color.NRGBA{R: 24, G: 26, B: 30, A: 255}
+	case theme.ColorNameDisabled:
+		return color.NRGBA{R: 100, G: 106, B: 118, A: 255}
+	case theme.ColorNameForeground:
+		return color.NRGBA{R: 240, G: 242, B: 245, A: 255}
+	case theme.ColorNameHover:
+		return color.NRGBA{R: 45, G: 52, B: 64, A: 255}
+	case theme.ColorNameInputBackground:
+		return color.NRGBA{R: 24, G: 28, B: 35, A: 255}
+	case theme.ColorNameMenuBackground:
+		return color.NRGBA{R: 22, G: 25, B: 31, A: 255}
+	case theme.ColorNameOverlayBackground:
+		return color.NRGBA{R: 22, G: 25, B: 31, A: 235}
+	case theme.ColorNamePrimary:
+		return color.NRGBA{R: 74, G: 144, B: 226, A: 255}
+	case theme.ColorNameScrollBar:
+		return color.NRGBA{R: 50, G: 56, B: 68, A: 180}
+	case theme.ColorNameShadow:
+		return color.NRGBA{R: 0, G: 0, B: 0, A: 120}
+	case theme.ColorNamePlaceHolder:
+		return color.NRGBA{R: 130, G: 136, B: 148, A: 255}
+	case theme.ColorNamePressed:
+		return color.NRGBA{R: 55, G: 65, B: 81, A: 255}
+	case theme.ColorNameSelection:
+		return color.NRGBA{R: 74, G: 144, B: 226, A: 75}
+	default:
+		return theme.DefaultTheme().Color(name, theme.VariantDark)
 	}
+}
 
-	// Cores do Pywal
-	if name == theme.ColorNamePrimary || 
-	   name == theme.ColorNameFocus || 
-	   name == theme.ColorNameSelection || 
-	   name == theme.ColorNameButton { 
-		return t.accentColor
+func (m *CleanTheme) Font(style fyne.TextStyle) fyne.Resource {
+	return theme.DefaultTheme().Font(style)
+}
+
+func (m *CleanTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
+	return theme.DefaultTheme().Icon(name)
+}
+
+func (m *CleanTheme) Size(name fyne.ThemeSizeName) float32 {
+	switch name {
+	case theme.SizeNamePadding:
+		return 6
+	case theme.SizeNameInlineIcon:
+		return 16
+	case theme.SizeNameScrollBar:
+		return 8
+	case theme.SizeNameScrollBarSmall:
+		return 4
+	case theme.SizeNameText:
+		return 13
+	case theme.SizeNameHeadingText:
+		return 18
+	case theme.SizeNameSubHeadingText:
+		return 15
+	case theme.SizeNameCaptionText:
+		return 11
+	case theme.SizeNameInputBorder:
+		return 1
+	default:
+		return theme.DefaultTheme().Size(name)
 	}
-	
-	return theme.DarkTheme().Color(name, variant)
 }
 
-func (t *DynamicTheme) Font(style fyne.TextStyle) fyne.Resource {
-	return theme.DarkTheme().Font(style)
-}
-
-func (t *DynamicTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
-	return theme.DarkTheme().Icon(name)
-}
-
-func (t *DynamicTheme) Size(name fyne.ThemeSizeName) float32 {
-	return theme.DarkTheme().Size(name)
-}
-
-func getWalColor() color.Color {
-	usr, err := user.Current()
-	if err != nil { return fallbackColor }
-	
-	path := filepath.Join(usr.HomeDir, ".cache", "wal", "colors")
-	file, err := os.Open(path)
-	if err != nil { return fallbackColor }
-	defer file.Close()
-	
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() { lines = append(lines, scanner.Text()) }
-	
-	if len(lines) > 1 {
-		return parseHexColor(lines[1])
+func LoadConfig() map[string]string {
+	cfg := make(map[string]string)
+	f, err := os.Open("config.txt")
+	if err != nil {
+		return cfg
 	}
-	return fallbackColor
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, extraSplit("=")...)
+		if len(parts) == 2 {
+			cfg[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	return cfg
 }
 
-func parseHexColor(s string) color.Color {
-	if len(s) != 7 || s[0] != '#' { return fallbackColor }
-	r, _ := strconv.ParseUint(s[1:3], 16, 8)
-	g, _ := strconv.ParseUint(s[3:5], 16, 8)
-	b, _ := strconv.ParseUint(s[5:7], 16, 8)
-	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 255}
+func extraSplit(sep string) []string {
+	return []string{sep, "2"}
+}
+
+func SaveConfig(cfg map[string]string) error {
+	f, err := os.Create("config.txt")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	for k, v := range cfg {
+		if _, err := f.WriteString(k + "=" + v + "\n"); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -1,41 +1,56 @@
 package main
 
 import (
+	"time"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/data/binding"
 )
 
 func main() {
-	checkDependencies()
+	a := app.NewWithID("com.henzo.atop")
+	a.Settings().SetTheme(&CleanTheme{})
 
-	a := app.New()
-	w := a.NewWindow("Go ADB Manager")
+	w := a.NewWindow("Atop - Android Device Monitor")
+	w.Resize(fyne.NewSize(520, 680))
+	w.SetFixedSize(false)
 
-	// w.SetDecorated(false)
-	// w.SetTransparent(true)
-
-	a.Settings().SetTheme(NewDynamicTheme())
-
-	state = &AppState{
-		App:                 a,
-		Window:              w,
-		CpuPercent:          binding.NewFloat(),
-		RamTotal:            binding.NewFloat(),
-		RamUsed:             binding.NewFloat(),
-		SwapTotal:           binding.NewFloat(),
-		SwapUsed:            binding.NewFloat(),
-		TableRefresher:      binding.NewBool(),
-		DeviceListRefresher: binding.NewBool(),
-		MdnsMap:             make(map[string]string),
+	appIcon := GetAppIcon()
+	if appIcon != nil {
+		w.SetIcon(appIcon)
 	}
 
-	w.Resize(fyne.NewSize(500, 700))
-	w.SetMaster()
+	state := NewAppState()
 
-	showDeviceListScreen()
+	// Cria e configura UI
+	ui := BuildUI(w, state)
+	w.SetContent(ui)
 
-	go mdnsAutoConnectLoop()
+	// Registra atalhos de teclado minimalistas
+	RegisterShortcuts(w, state)
+
+	// Inicia rotina de atualizacao de telemetria
+	ticker := time.NewTicker(2 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				if state.IsMonitoring() {
+					state.FetchMetrics()
+				}
+			case <-state.StopChan:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+
+	// Loop contínuo de varredura mDNS a cada 5 minutos
+	go StartMDNSPeriodicScanner(state)
+
+	w.SetOnClosed(func() {
+		state.Cleanup()
+	})
 
 	w.ShowAndRun()
 }
