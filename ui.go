@@ -305,14 +305,16 @@ func showDeviceListScreen() {
 		active := state.MdnsRunning
 		state.MdnsMutex.Unlock()
 
-		if active {
-			mdnsStatus.Text = "[•] Radar Wi-Fi: Ativo (Scan 5m)"
-			mdnsStatus.Color = color.RGBA{R: 16, G: 185, B: 129, A: 255}
-		} else {
-			mdnsStatus.Text = "[•] Radar Wi-Fi: Desativado"
-			mdnsStatus.Color = color.RGBA{R: 140, G: 140, B: 150, A: 255}
-		}
-		mdnsStatus.Refresh()
+		fyne.Do(func() {
+			if active {
+				mdnsStatus.Text = "[•] Radar Wi-Fi: Ativo (Scan 5m)"
+				mdnsStatus.Color = color.RGBA{R: 16, G: 185, B: 129, A: 255}
+			} else {
+				mdnsStatus.Text = "[•] Radar Wi-Fi: Desativado"
+				mdnsStatus.Color = color.RGBA{R: 140, G: 140, B: 150, A: 255}
+			}
+			mdnsStatus.Refresh()
+		})
 	}
 	updateMdnsStatus()
 
@@ -418,8 +420,10 @@ func showMonitorScreen() {
 		if desc == "" {
 			desc = state.CurrentDevice.Serial
 		}
-		infoLabel.Text = desc
-		infoLabel.Refresh()
+		fyne.Do(func() {
+			infoLabel.Text = desc
+			infoLabel.Refresh()
+		})
 	}()
 
 	// --- 2. BARRAS DE ESTATÍSTICAS ---
