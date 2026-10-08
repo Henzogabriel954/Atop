@@ -1,0 +1,11 @@
+# Binários compilados
+monitor
+monitor.exe
+atop
+atop.exe
+*.bin
+*.out
+
+# Arquivos temporários e do sistema
+.DS_Store
+Thumbs.db
